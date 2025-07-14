@@ -157,7 +157,7 @@ void qmc5883p_run(qmc5883p_dev_t *dev)
             
         case QMC5883P_STATE_RESET:
             /* 软件复位 */
-            ret = qmc5883p_i2c_write_reg(dev->device_address, QMC5883P_ADDR_CONFIG2, QMC5883P_CONFIG2_SOFT_RST);
+            ret = qmc5883p_i2c_write_reg(dev->i2c.i2c_handle, dev->device_address, QMC5883P_ADDR_CONFIG2, QMC5883P_CONFIG2_SOFT_RST);
             if (ret != 0) {
                 dev->state = QMC5883P_STATE_ERROR;
                 if (dev->schedule.delay_ms) {
