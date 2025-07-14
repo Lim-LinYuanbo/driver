@@ -50,18 +50,32 @@ typedef enum {
 } qmc5883p_state_t;
 
 /* I2C操作函数指针类型 */
-typedef int (*qmc5883p_i2c_read_t)(uint8_t addr, uint8_t reg, uint8_t *data, uint32_t len);
-typedef int (*qmc5883p_i2c_write_t)(uint8_t addr, uint8_t reg, const uint8_t *data, uint32_t len);
-typedef int (*qmc5883p_i2c_write_reg_t)(uint8_t addr, uint8_t reg, uint8_t value);
+typedef int (*qmc5883p_i2c_read_t)(void *i2c_handle, uint8_t addr, uint8_t reg, uint8_t *data, uint32_t len);
+typedef int (*qmc5883p_i2c_write_t)(void *i2c_handle, uint8_t addr, uint8_t reg, const uint8_t *data, uint32_t len);
 
 /* 延时函数指针类型 */
-typedef void (*qmc5883p_delay_ms_t)(uint32_t ms);
+typedef void (*qmc5883p_delay_ms_t)(void *arg, uint32_t ms);
 
 /* 调度函数指针类型 */
-typedef void (*qmc5883p_schedule_t)(void *arg, uint32_t delay_ms);
+typedef void (*qmc5883p_on_interval_t)(void *arg, uint32_t delay_ms);
 
 /* 数据回调函数指针类型 */
 typedef void (*qmc5883p_data_callback_t)(int16_t x, int16_t y, int16_t z, int16_t temp, bool overflow, void *user_data);
+
+typedef struct
+{
+    /* 函数指针 */
+    qmc5883p_i2c_read_t i2c_read;     /* I2C读函数 */
+    qmc5883p_i2c_write_t i2c_write;   /* I2C写函数 */
+    void *i2c_handle;
+} qmc5883p_i2c_t;
+
+typedef struct
+{
+    qmc5883p_delay_ms_t delay_ms;     /* 延时函数 */
+    qmc5883p_on_interval_t on_interval;     /* 调度函数 */
+    void *schedule_arg;               /* 调度函数参数 */
+} qmc5883p_schedule_t;
 
 /* QMC5883P设备结构体 */
 typedef struct {
@@ -78,16 +92,12 @@ typedef struct {
     int16_t temperature;              /* 温度数据 */
     bool data_ready;                  /* 数据准备标志 */
     bool overflow;                    /* 溢出标志 */
-    
-    /* 函数指针 */
-    qmc5883p_i2c_read_t i2c_read;     /* I2C读函数 */
-    qmc5883p_i2c_write_t i2c_write;   /* I2C写函数 */
-    qmc5883p_i2c_write_reg_t i2c_write_reg; /* I2C写寄存器函数 */
-    qmc5883p_delay_ms_t delay_ms;     /* 延时函数 */
-    qmc5883p_schedule_t schedule;     /* 调度函数 */
+
+    qmc5883p_i2c_t *i2c;
+    qmc5883p_schedule_t *schedule;
+
     qmc5883p_data_callback_t callback; /* 数据回调函数 */
     void *callback_user_data;         /* 回调函数用户数据 */
-    void *schedule_arg;               /* 调度函数参数 */
 } qmc5883p_dev_t;
 
 /* 初始化QMC5883P设备 */
@@ -96,12 +106,8 @@ void qmc5883p_init(qmc5883p_dev_t *dev,
                    qmc5883p_osr_t osr,
                    qmc5883p_range_t range,
                    qmc5883p_dr_t data_rate,
-                   qmc5883p_i2c_read_t i2c_read,
-                   qmc5883p_i2c_write_t i2c_write,
-                   qmc5883p_i2c_write_reg_t i2c_write_reg,
-                   qmc5883p_delay_ms_t delay_ms,
-                   qmc5883p_schedule_t schedule,
-                   void *schedule_arg,
+                   qmc5883p_i2c_t *i2c,
+                   qmc5883p_schedule_t *schedule,
                    qmc5883p_data_callback_t callback,
                    void *user_data);
 
