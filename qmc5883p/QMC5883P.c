@@ -7,12 +7,8 @@ void qmc5883p_init(qmc5883p_dev_t *dev,
                    qmc5883p_osr_t osr,
                    qmc5883p_range_t range,
                    qmc5883p_dr_t data_rate,
-                   qmc5883p_i2c_read_t i2c_read,
-                   qmc5883p_i2c_write_t i2c_write,
-                   qmc5883p_i2c_write_reg_t i2c_write_reg,
-                   qmc5883p_delay_ms_t delay_ms,
-                   qmc5883p_schedule_t schedule,
-                   void *schedule_arg,
+                   qmc5883p_i2c_t *i2c,
+                   qmc5883p_schedule_t *schedule,
                    qmc5883p_data_callback_t callback,
                    void *user_data)
 {
@@ -29,29 +25,36 @@ void qmc5883p_init(qmc5883p_dev_t *dev,
     dev->config2 = QMC5883P_CONFIG2_INT_ENB | QMC5883P_CONFIG2_ROL_PNT;
     
     /* 设置函数指针 */
-    dev->i2c_read = i2c_read;
-    dev->i2c_write = i2c_write;
-    dev->i2c_write_reg = i2c_write_reg;
-    dev->delay_ms = delay_ms;
+    dev->i2c = i2c;
     dev->schedule = schedule;
-    dev->schedule_arg = schedule_arg;
     dev->callback = callback;
     dev->callback_user_data = user_data;
+}
+
+static int qmc5883p_i2c_write_reg(void *i2c_handle, uint8_t addr, uint8_t reg, uint8_t value)
+{
+    uint8_t data_buf[2] = {reg, value};
+    ret = dev->i2c_write(dev->i2c.i2c_handle, dev->device_address, data_buf, 2);
+    if (ret != 0) {
+        return ret;
+    }
+    return 0;
 }
 
 /* 设置QMC5883P配置 */
 int qmc5883p_set_config(qmc5883p_dev_t *dev)
 {
+    
     int ret = 0;
     
     /* 配置寄存器1 */
-    ret = dev->i2c_write_reg(dev->device_address, QMC5883P_ADDR_CONFIG1, dev->config1);
+    ret = qmc5883p_i2c_write_reg(dev->i2c.i2c_handle, dev->device_address, QMC5883P_ADDR_CONFIG1, dev->config1);
     if (ret != 0) {
         return ret;
     }
     
     /* 配置寄存器2 */
-    ret = dev->i2c_write_reg(dev->device_address, QMC5883P_ADDR_CONFIG2, dev->config2);
+    ret = qmc5883p_i2c_write_reg(dev->i2c.i2c_handle, dev->device_address, QMC5883P_ADDR_CONFIG2, dev->config2);
     if (ret != 0) {
         return ret;
     }
@@ -65,8 +68,8 @@ int qmc5883p_start(qmc5883p_dev_t *dev)
     dev->state = QMC5883P_STATE_CHECK_ID;
     
     /* 调度第一次运行 */
-    if (dev->schedule) {
-        dev->schedule(dev->schedule_arg, 1);
+    if (dev->schedule.delay_ms) {
+        dev->schedule.delay_ms(dev->schedule.schedule_arg, 1);
     }
     
     return 0;
@@ -130,8 +133,8 @@ void qmc5883p_run(qmc5883p_dev_t *dev)
         case QMC5883P_STATE_INIT:
             /* 初始化已在qmc5883p_init中完成 */
             dev->state = QMC5883P_STATE_CHECK_ID;
-            if (dev->schedule) {
-                dev->schedule(dev->schedule_arg, 1);
+            if (dev->schedule.delay_ms) {
+                dev->schedule.delay_ms(dev->schedule.schedule_arg, 1);
             }
             break;
             
@@ -140,33 +143,33 @@ void qmc5883p_run(qmc5883p_dev_t *dev)
             ret = dev->i2c_read(dev->device_address, QMC5883P_ADDR_CHIP_ID, &chip_id, 1);
             if (ret != 0 || chip_id != QMC5883P_CHIP_ID) {
                 dev->state = QMC5883P_STATE_ERROR;
-                if (dev->schedule) {
-                    dev->schedule(dev->schedule_arg, 1000); /* 重试间隔1秒 */
+                if (dev->schedule.delay_ms) {
+                    dev->schedule.delay_ms(dev->schedule.schedule_arg, 1000); /* 重试间隔1秒 */
                 }
                 break;
             }
             
             dev->state = QMC5883P_STATE_RESET;
-            if (dev->schedule) {
-                dev->schedule(dev->schedule_arg, 1);
+            if (dev->schedule.delay_ms) {
+                dev->schedule.delay_ms(dev->schedule.schedule_arg, 1);
             }
             break;
             
         case QMC5883P_STATE_RESET:
             /* 软件复位 */
-            ret = dev->i2c_write_reg(dev->device_address, QMC5883P_ADDR_CONFIG2, QMC5883P_CONFIG2_SOFT_RST);
+            ret = qmc5883p_i2c_write_reg(dev->device_address, QMC5883P_ADDR_CONFIG2, QMC5883P_CONFIG2_SOFT_RST);
             if (ret != 0) {
                 dev->state = QMC5883P_STATE_ERROR;
-                if (dev->schedule) {
-                    dev->schedule(dev->schedule_arg, 1000);
+                if (dev->schedule.delay_ms) {
+                    dev->schedule.delay_ms(dev->schedule.schedule_arg, 1000);
                 }
                 break;
             }
             
             dev->reset_count = 0;
             dev->state = QMC5883P_STATE_WAIT_RESET;
-            if (dev->schedule) {
-                dev->schedule(dev->schedule_arg, 5); /* 等待复位完成 */
+            if (dev->schedule.delay_ms) {
+                dev->schedule.delay_ms(dev->schedule.schedule_arg, 5); /* 等待复位完成 */
             }
             break;
             
@@ -175,12 +178,12 @@ void qmc5883p_run(qmc5883p_dev_t *dev)
             dev->reset_count++;
             if (dev->reset_count > 3) {
                 dev->state = QMC5883P_STATE_CONFIGURE;
-                if (dev->schedule) {
-                    dev->schedule(dev->schedule_arg, 1);
+                if (dev->schedule.delay_ms) {
+                    dev->schedule.delay_ms(dev->schedule.schedule_arg, 1);
                 }
             } else {
-                if (dev->schedule) {
-                    dev->schedule(dev->schedule_arg, 5);
+                if (dev->schedule.delay_ms) {
+                    dev->schedule.delay_ms(dev->schedule.schedule_arg, 5);
                 }
             }
             break;
@@ -190,16 +193,16 @@ void qmc5883p_run(qmc5883p_dev_t *dev)
             ret = qmc5883p_set_config(dev);
             if (ret != 0) {
                 dev->state = QMC5883P_STATE_ERROR;
-                if (dev->schedule) {
-                    dev->schedule(dev->schedule_arg, 1000);
+                if (dev->schedule.delay_ms) {
+                    dev->schedule.delay_ms(dev->schedule.schedule_arg, 1000);
                 }
                 break;
             }
             
             dev->check_count = 0;
             dev->state = QMC5883P_STATE_CHECK_CONFIG;
-            if (dev->schedule) {
-                dev->schedule(dev->schedule_arg, 1);
+            if (dev->schedule.delay_ms) {
+                dev->schedule.delay_ms(dev->schedule.schedule_arg, 1);
             }
             break;
             
@@ -210,20 +213,20 @@ void qmc5883p_run(qmc5883p_dev_t *dev)
                 dev->check_count++;
                 if (dev->check_count > 3) {
                     dev->state = QMC5883P_STATE_ERROR;
-                    if (dev->schedule) {
-                        dev->schedule(dev->schedule_arg, 1000);
+                    if (dev->schedule.delay_ms) {
+                        dev->schedule.delay_ms(dev->schedule.schedule_arg, 1000);
                     }
                 } else {
                     dev->state = QMC5883P_STATE_CONFIGURE;
-                    if (dev->schedule) {
-                        dev->schedule(dev->schedule_arg, 1);
+                    if (dev->schedule.delay_ms) {
+                        dev->schedule.delay_ms(dev->schedule.schedule_arg, 1);
                     }
                 }
                 break;
             }
             
             dev->state = QMC5883P_STATE_READ;
-            if (dev->schedule) {
+            if (dev->schedule.delay_ms) {
                 /* 根据数据速率设置读取间隔 */
                 uint32_t delay = 0;
                 switch (dev->data_rate) {
@@ -233,7 +236,7 @@ void qmc5883p_run(qmc5883p_dev_t *dev)
                     case QMC5883P_DR_200Hz: delay = 5;   break;
                     default: delay = 100; break;
                 }
-                dev->schedule(dev->schedule_arg, delay);
+                dev->schedule.delay_ms(dev->schedule.schedule_arg, delay);
             }
             break;
             
@@ -242,8 +245,8 @@ void qmc5883p_run(qmc5883p_dev_t *dev)
             ret = read_data(dev);
             if (ret != 0) {
                 dev->state = QMC5883P_STATE_ERROR;
-                if (dev->schedule) {
-                    dev->schedule(dev->schedule_arg, 1000);
+                if (dev->schedule.delay_ms) {
+                    dev->schedule.delay_ms(dev->schedule.schedule_arg, 1000);
                 }
                 break;
             }
@@ -256,7 +259,7 @@ void qmc5883p_run(qmc5883p_dev_t *dev)
             
             dev->state = QMC5883P_STATE_SUCCESS;
             /* 继续读取下一组数据 */
-            if (dev->schedule) {
+            if (dev->schedule.delay_ms) {
                 uint32_t delay = 0;
                 switch (dev->data_rate) {
                     case QMC5883P_DR_10Hz:  delay = 100; break;
@@ -265,14 +268,14 @@ void qmc5883p_run(qmc5883p_dev_t *dev)
                     case QMC5883P_DR_200Hz: delay = 5;   break;
                     default: delay = 100; break;
                 }
-                dev->schedule(dev->schedule_arg, delay);
+                dev->schedule.delay_ms(dev->schedule.schedule_arg, delay);
             }
             break;
             
         case QMC5883P_STATE_SUCCESS:
             /* 成功状态，继续读取数据 */
             dev->state = QMC5883P_STATE_READ;
-            if (dev->schedule) {
+            if (dev->schedule.delay_ms) {
                 uint32_t delay = 0;
                 switch (dev->data_rate) {
                     case QMC5883P_DR_10Hz:  delay = 100; break;
@@ -281,22 +284,22 @@ void qmc5883p_run(qmc5883p_dev_t *dev)
                     case QMC5883P_DR_200Hz: delay = 5;   break;
                     default: delay = 100; break;
                 }
-                dev->schedule(dev->schedule_arg, delay);
+                dev->schedule.delay_ms(dev->schedule.schedule_arg, delay);
             }
             break;
             
         case QMC5883P_STATE_ERROR:
             /* 错误状态，尝试恢复 */
             dev->state = QMC5883P_STATE_INIT;
-            if (dev->schedule) {
-                dev->schedule(dev->schedule_arg, 1000);
+            if (dev->schedule.delay_ms) {
+                dev->schedule.delay_ms(dev->schedule.schedule_arg, 1000);
             }
             break;
             
         default:
             dev->state = QMC5883P_STATE_ERROR;
-            if (dev->schedule) {
-                dev->schedule(dev->schedule_arg, 1000);
+            if (dev->schedule.delay_ms) {
+                dev->schedule.delay_ms(dev->schedule.schedule_arg, 1000);
             }
             break;
     }
